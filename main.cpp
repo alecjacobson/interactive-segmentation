@@ -1,9 +1,11 @@
+#include "gco-v3/GCoptimization.h"
 #include <igl/unproject_onto_mesh.h>
 #include <igl/read_triangle_mesh.h>
 #include <igl/triangle_triangle_adjacency.h>
 #include <igl/barycenter.h>
 #include <igl/viewer/Viewer.h>
-#include "gco-v3/GCoptimization.h"
+#include <GLFW/glfw3.h>
+#include <thread>
 #include <iostream>
 
 
@@ -36,16 +38,19 @@ int main(int argc, char *argv[])
   for(int f = 0;f<F.rows();f++)
   {
     data(f,0) = 0;
-    data(f,1) = 0.0005*GCO_MAX_ENERGYTERM;
+    data(f,1) = 0.00005*GCO_MAX_ENERGYTERM;
   }
   //
   // per-label-per-label smoothness costs
   MatrixXRi smooth = MatrixXRi::Zero(K,K);
   // Set off diagonals to punish switching labels
-  smooth(0,1) = 0.02*GCO_MAX_ENERGYTERM;
-  smooth(1,0) = 0.02*GCO_MAX_ENERGYTERM;
+  smooth(0,1) = 0.002*GCO_MAX_ENERGYTERM;
+  smooth(1,0) = 0.002*GCO_MAX_ENERGYTERM;
 
+  // Labels
   Eigen::VectorXi L(F.rows());
+  // User constraints
+  Eigen::VectorXi U = Eigen::VectorXi::Constant(F.rows(),1,-1);
   GCoptimizationGeneralGraph gc(F.rows(),K);
   gc.setDataCost(data.data());
   gc.setSmoothCost(smooth.data());
@@ -69,14 +74,65 @@ int main(int argc, char *argv[])
     }
   }
 
-  gc.swap(1);
-  for(int f = 0;f<F.rows();f++)
-  {
-    L(f) = gc.whatLabel(f);
-  }
 
   igl::viewer::Viewer viewer;
-  const auto shoot = [&V,&F,&C,&viewer,&gc,&data,&L]()->bool
+  viewer.data.set_mesh(V, F);
+  viewer.core.show_lines = false;
+
+  const auto update_colors = [&L,&U,&viewer]()
+  {
+    for(int f = 0;f<L.size();f++)
+    {
+      if(U(f) >= 0)
+      {
+        L(f) = U(f);
+      }
+    }
+    viewer.data.set_colors(L.cast<double>());
+  };
+  const auto update_cut = [&gc,&update_colors,&L]()
+  {
+    gc.swap(1);
+    for(int f = 0;f<L.size();f++)
+    {
+      L(f) = gc.whatLabel(f);
+    }
+    update_colors();
+  };
+  update_cut();
+
+  std::mutex mu_loop,mu_cond;
+  std::condition_variable conditional;
+  bool background_thread_is_looping = true;
+  bool needs_update = false;
+  const auto background_loop = 
+    [&background_thread_is_looping,&mu_loop,&mu_cond,&needs_update,&conditional,&update_cut]()
+  {
+    while(true)
+    {
+      {
+        std::unique_lock<std::mutex> lock(mu_cond);
+        conditional.wait(lock,[&needs_update](){return needs_update;});
+        needs_update = false;
+      }
+      bool keep_going = false;
+      {
+        std::unique_lock<std::mutex> lock(mu_loop);
+        keep_going = background_thread_is_looping;
+      }
+      if(!keep_going)
+      {
+        break;
+      }
+      // Call these after break so not called on finally update before exitting
+      // loop
+      update_cut();
+      glfwPostEmptyEvent();
+    }
+  };
+  std::thread background_thread(background_loop);
+
+  const auto shoot = [&update_colors,&V,&F,&C,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update]()->bool
   {
     int fid;
     Eigen::Vector3f bc;
@@ -87,22 +143,22 @@ int main(int argc, char *argv[])
       viewer.core.proj, viewer.core.viewport, V, F, fid, bc))
     {
       L(fid) = 1;
+      U(fid) = 1;
       data(fid,0) = GCO_MAX_ENERGYTERM;
       data(fid,1) = 0;
-      viewer.data.set_colors(L.cast<double>());
+
+      {
+        std::lock_guard<std::mutex> lock(mu_cond);
+        needs_update = true;
+      }
+      conditional.notify_all();
+
+      update_colors();
       return true;
     }
     return false;
   };
-  const auto update_cut = [&L,&gc,&viewer]()
-  {
-    gc.swap(2);
-    for(int f = 0;f<L.size();f++)
-    {
-      L(f) = gc.whatLabel(f);
-    }
-    viewer.data.set_colors(L.cast<double>());
-  };
+
   bool is_dragging_on_mesh = false;
   viewer.callback_mouse_down = 
     [&V,&F,&C,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
@@ -115,10 +171,10 @@ int main(int argc, char *argv[])
     [&is_dragging_on_mesh,&update_cut,&gc,&L] 
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
-    if(is_dragging_on_mesh)
-    {
-      update_cut();
-    }
+    //if(is_dragging_on_mesh)
+    //{
+    //  update_cut();
+    //}
     is_dragging_on_mesh = false;
     return false;
   };
@@ -154,9 +210,17 @@ int main(int argc, char *argv[])
 
 )";
   // Show mesh
-  viewer.data.set_mesh(V, F);
-  viewer.data.set_colors(L.cast<double>());
-  viewer.core.show_lines = false;
   viewer.launch();
+  {
+    std::lock_guard<std::mutex> lock(mu_loop);
+    background_thread_is_looping = false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mu_cond);
+    needs_update = true;
+  }
+  conditional.notify_all();
+
+  background_thread.join();
 
 }
