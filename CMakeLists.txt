@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.6)
-project(example)
+project(segment)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -70,6 +70,7 @@ include_directories(${LIBIGL_INCLUDE_DIRS})
 add_definitions(${LIBIGL_DEFINITIONS})
 
 # Add your project files
-FILE(GLOB SRCFILES *.cpp)
-add_executable(${PROJECT_NAME}_bin ${SRCFILES} ${LIBIGL_EXTRA_SOURCES})
-target_link_libraries(${PROJECT_NAME}_bin ${LIBIGL_LIBRARIES} ${LIBIGL_EXTRA_LIBRARIES})
+file(GLOB SRCFILES *.cpp)
+file(GLOB GCO_SRCFILES gco-v3/GCoptimization.cpp gco-v3/LinkedBlockList.cpp)
+add_executable(${PROJECT_NAME} ${SRCFILES} ${GCO_SRCFILES} ${LIBIGL_EXTRA_SOURCES})
+target_link_libraries(${PROJECT_NAME} ${LIBIGL_LIBRARIES} ${LIBIGL_EXTRA_LIBRARIES})
