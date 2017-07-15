@@ -27,7 +27,7 @@ endif()
 # libigl options: choose between header only and compiled static library
 # Header-only is preferred for small projects. For larger projects the static build
 # considerably reduces the compilation times
-option(LIBIGL_USE_STATIC_LIBRARY "Use LibIGL as static library" OFF)
+option(LIBIGL_USE_STATIC_LIBRARY "Use LibIGL as static library" ON)
 
 # add a customizable menu bar
 option(LIBIGL_WITH_NANOGUI     "Use Nanogui menu"   OFF)
@@ -37,14 +37,14 @@ option(LIBIGL_WITH_VIEWER      "Use OpenGL viewer"  ON)
 option(LIBIGL_WITH_OPENGL      "Use OpenGL"         ON)
 option(LIBIGL_WITH_OPENGL_GLFW "Use GLFW"           ON)
 option(LIBIGL_WITH_BBW         "Use BBW"            OFF)
-option(LIBIGL_WITH_EMBREE      "Use Embree"         OFF)
+option(LIBIGL_WITH_EMBREE      "Use Embree"         ON)
 option(LIBIGL_WITH_PNG         "Use PNG"            OFF)
 option(LIBIGL_WITH_TETGEN      "Use Tetgen"         OFF)
 option(LIBIGL_WITH_TRIANGLE    "Use Triangle"       OFF)
 option(LIBIGL_WITH_XML         "Use XML"            OFF)
 option(LIBIGL_WITH_LIM         "Use LIM"            OFF)
 option(LIBIGL_WITH_COMISO      "Use CoMiso"         OFF)
-option(LIBIGL_WITH_MATLAB      "Use Matlab"         OFF) # This option is not supported yet
+option(LIBIGL_WITH_MATLAB      "Use Matlab"         ON) # This option is not supported yet
 option(LIBIGL_WITH_MOSEK       "Use MOSEK"          OFF) # This option is not supported yet
 option(LIBIGL_WITH_CGAL        "Use CGAL"           OFF)
 if(LIBIGL_WITH_CGAL) # Do not remove or move this block, the cgal build system fails without it
