@@ -1,6 +1,7 @@
 #include "gco-v3/GCoptimization.h"
 #include <igl/unproject_onto_mesh.h>
 #include <igl/read_triangle_mesh.h>
+#include <igl/remove_duplicate_vertices.h>
 #include <igl/triangle_triangle_adjacency.h>
 #include <igl/barycenter.h>
 #include <igl/viewer/Viewer.h>
@@ -15,12 +16,17 @@
 
 int main(int argc, char *argv[])
 {
-  // Mesh with per-face color
-  Eigen::MatrixXd V, C;
+  Eigen::MatrixXd V;
   Eigen::MatrixXi F;
 
   // Load a mesh in OFF format
   igl::read_triangle_mesh(argv[1],V,F);
+  {
+    // Remove duplicate vertices (especially needed for .stl files)
+    Eigen::VectorXi I,J;
+    igl::remove_duplicate_vertices(
+      Eigen::MatrixXd(V),Eigen::MatrixXi(F),0,V,I,J,F);
+  }
 
   Eigen::MatrixXd BC;
   igl::barycenter(V,F,BC);
@@ -132,7 +138,7 @@ int main(int argc, char *argv[])
   };
   std::thread background_thread(background_loop);
 
-  const auto shoot = [&update_colors,&V,&F,&C,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update]()->bool
+  const auto shoot = [&update_colors,&V,&F,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update]()->bool
   {
     int fid;
     Eigen::Vector3f bc;
@@ -161,7 +167,7 @@ int main(int argc, char *argv[])
 
   bool is_dragging_on_mesh = false;
   viewer.callback_mouse_down = 
-    [&V,&F,&C,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
+    [&V,&F,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
     is_dragging_on_mesh = shoot();
@@ -179,7 +185,7 @@ int main(int argc, char *argv[])
     return false;
   };
   viewer.callback_mouse_move= 
-    [&V,&F,&C,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
+    [&V,&F,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
     if(is_dragging_on_mesh)

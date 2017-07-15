@@ -1,7 +1,10 @@
 #ifdef MATLAB_MEX_FILE
 #include <mex.h>
 #endif
+
 #include "GCoptimization.h"
+#include "graph.cpp"
+#include "maxflow.cpp"
 #include "LinkedBlockList.h"
 #include <stdio.h>
 #include <stdlib.h>

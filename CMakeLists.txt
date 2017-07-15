@@ -71,6 +71,8 @@ add_definitions(${LIBIGL_DEFINITIONS})
 
 # Add your project files
 file(GLOB SRCFILES *.cpp)
-file(GLOB GCO_SRCFILES gco-v3/GCoptimization.cpp gco-v3/LinkedBlockList.cpp)
+file(GLOB GCO_SRCFILES 
+  gco-v3/GCoptimization.cpp
+  gco-v3/LinkedBlockList.cpp)
 add_executable(${PROJECT_NAME} ${SRCFILES} ${GCO_SRCFILES} ${LIBIGL_EXTRA_SOURCES})
 target_link_libraries(${PROJECT_NAME} ${LIBIGL_LIBRARIES} ${LIBIGL_EXTRA_LIBRARIES})
