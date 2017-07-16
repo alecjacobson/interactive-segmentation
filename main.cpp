@@ -36,6 +36,7 @@ int main(int argc, char *argv[])
   
   // Number of labels
   int K = 2;
+  int selected_id = 1;
   // per-face-per-label data term: GCO is expecting Row-major ordering
   typedef Eigen::Matrix<int,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor> 
     MatrixXRi;
@@ -43,8 +44,11 @@ int main(int argc, char *argv[])
   // Phony data
   for(int f = 0;f<F.rows();f++)
   {
-    data(f,0) = 0;
-    data(f,1) = 0.00005*GCO_MAX_ENERGYTERM;
+    // Initialize everything to slightly lean toward id=0
+    for(int j = 0;j<K;j++)
+    {
+      data(f,j) = j==0 ? 0 : 0.00005*GCO_MAX_ENERGYTERM;
+    }
   }
   //
   // per-label-per-label smoothness costs
@@ -85,6 +89,11 @@ int main(int argc, char *argv[])
   viewer.data.set_mesh(V, F);
   viewer.core.show_lines = false;
 
+  std::mutex mu_loop,mu_cond,mu_color;
+  std::condition_variable conditional;
+  bool background_thread_is_looping = true;
+  bool needs_update = false;
+
   const auto update_colors = [&L,&U,&viewer]()
   {
     for(int f = 0;f<L.size();f++)
@@ -96,21 +105,20 @@ int main(int argc, char *argv[])
     }
     viewer.data.set_colors(L.cast<double>());
   };
-  const auto update_cut = [&gc,&update_colors,&L]()
+  const auto update_cut = [&gc,&update_colors,&L,&mu_color]()
   {
     gc.swap(1);
     for(int f = 0;f<L.size();f++)
     {
       L(f) = gc.whatLabel(f);
     }
-    update_colors();
+    {
+      std::lock_guard<std::mutex> lock(mu_color);
+      update_colors();
+    }
   };
   update_cut();
 
-  std::mutex mu_loop,mu_cond;
-  std::condition_variable conditional;
-  bool background_thread_is_looping = true;
-  bool needs_update = false;
   const auto background_loop = 
     [&background_thread_is_looping,&mu_loop,&mu_cond,&needs_update,&conditional,&update_cut]()
   {
@@ -138,7 +146,8 @@ int main(int argc, char *argv[])
   };
   std::thread background_thread(background_loop);
 
-  const auto shoot = [&update_colors,&V,&F,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update]()->bool
+  const auto shoot = 
+    [&K,&selected_id,&update_colors,&V,&F,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update,&mu_color]()->bool
   {
     int fid;
     Eigen::Vector3f bc;
@@ -148,10 +157,12 @@ int main(int argc, char *argv[])
     if(igl::unproject_onto_mesh(Eigen::Vector2f(x,y), viewer.core.view * viewer.core.model,
       viewer.core.proj, viewer.core.viewport, V, F, fid, bc))
     {
-      L(fid) = 1;
-      U(fid) = 1;
-      data(fid,0) = GCO_MAX_ENERGYTERM;
-      data(fid,1) = 0;
+      L(fid) = selected_id;
+      U(fid) = selected_id;
+      for(int j = 0;j<K;j++)
+      {
+        data(fid,j) = j==selected_id ? 0 : GCO_MAX_ENERGYTERM;
+      }
 
       {
         std::lock_guard<std::mutex> lock(mu_cond);
@@ -159,7 +170,10 @@ int main(int argc, char *argv[])
       }
       conditional.notify_all();
 
-      update_colors();
+      {
+        std::lock_guard<std::mutex> lock(mu_color);
+        update_colors();
+      }
       return true;
     }
     return false;
@@ -167,25 +181,21 @@ int main(int argc, char *argv[])
 
   bool is_dragging_on_mesh = false;
   viewer.callback_mouse_down = 
-    [&V,&F,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
+    [&V,&F,&shoot,&is_dragging_on_mesh,&gc]
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
     is_dragging_on_mesh = shoot();
     return is_dragging_on_mesh;
   };
   viewer.callback_mouse_up = 
-    [&is_dragging_on_mesh,&update_cut,&gc,&L] 
+    [&is_dragging_on_mesh,&gc,&L] 
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
-    //if(is_dragging_on_mesh)
-    //{
-    //  update_cut();
-    //}
     is_dragging_on_mesh = false;
     return false;
   };
   viewer.callback_mouse_move= 
-    [&V,&F,&shoot,&update_cut,&is_dragging_on_mesh,&gc]
+    [&V,&F,&shoot,&is_dragging_on_mesh,&gc]
     (igl::viewer::Viewer& viewer, int, int)->bool
   {
     if(is_dragging_on_mesh)
@@ -195,19 +205,30 @@ int main(int argc, char *argv[])
     }
     return false;
   };
-  viewer.callback_key_down =
+  viewer.callback_key_pressed =
     [&](igl::viewer::Viewer & viewer, unsigned char key, int mod)->bool
    {
     switch(key)
     {
       default:
         return false;
+      case '<':
+      {
+        selected_id = (selected_id-1+K)%K;
+        break;
+      }
+      case '>':
+      {
+        selected_id = (selected_id+1)%K;
+        break;
+      }
       case 'L':
       {
         std::cout<<L.transpose().cast<double>()<<std::endl;
         break;
       }
     }
+        return true;
    };
 
 
