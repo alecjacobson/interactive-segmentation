@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
   viewer.data.set_mesh(V, F);
   viewer.core.show_lines = false;
 
-  std::mutex mu_loop,mu_cond,mu_color;
+  std::mutex mu;
   std::condition_variable conditional;
   bool background_thread_is_looping = true;
   bool needs_update = false;
@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
     }
     viewer.data.set_colors(L.cast<double>());
   };
-  const auto update_cut = [&gc,&update_colors,&L,&mu_color]()
+  const auto update_cut = [&gc,&update_colors,&L,&mu]()
   {
     gc.swap(1);
     for(int f = 0;f<L.size();f++)
@@ -113,25 +113,25 @@ int main(int argc, char *argv[])
       L(f) = gc.whatLabel(f);
     }
     {
-      std::lock_guard<std::mutex> lock(mu_color);
+      std::lock_guard<std::mutex> lock(mu);
       update_colors();
     }
   };
   update_cut();
 
   const auto background_loop = 
-    [&background_thread_is_looping,&mu_loop,&mu_cond,&needs_update,&conditional,&update_cut]()
+    [&background_thread_is_looping,&mu,&needs_update,&conditional,&update_cut]()
   {
     while(true)
     {
       {
-        std::unique_lock<std::mutex> lock(mu_cond);
+        std::unique_lock<std::mutex> lock(mu);
         conditional.wait(lock,[&needs_update](){return needs_update;});
         needs_update = false;
       }
       bool keep_going = false;
       {
-        std::unique_lock<std::mutex> lock(mu_loop);
+        std::unique_lock<std::mutex> lock(mu);
         keep_going = background_thread_is_looping;
       }
       if(!keep_going)
@@ -147,7 +147,7 @@ int main(int argc, char *argv[])
   std::thread background_thread(background_loop);
 
   const auto shoot = 
-    [&K,&selected_id,&update_colors,&V,&F,&viewer,&gc,&data,&L,&U,&mu_cond,&conditional,&needs_update,&mu_color]()->bool
+    [&K,&selected_id,&update_colors,&V,&F,&viewer,&gc,&data,&L,&U,&conditional,&needs_update,&mu]()->bool
   {
     int fid;
     Eigen::Vector3f bc;
@@ -165,13 +165,13 @@ int main(int argc, char *argv[])
       }
 
       {
-        std::lock_guard<std::mutex> lock(mu_cond);
+        std::lock_guard<std::mutex> lock(mu);
         needs_update = true;
       }
       conditional.notify_all();
 
       {
-        std::lock_guard<std::mutex> lock(mu_color);
+        std::lock_guard<std::mutex> lock(mu);
         update_colors();
       }
       return true;
@@ -239,11 +239,11 @@ int main(int argc, char *argv[])
   // Show mesh
   viewer.launch();
   {
-    std::lock_guard<std::mutex> lock(mu_loop);
+    std::lock_guard<std::mutex> lock(mu);
     background_thread_is_looping = false;
   }
   {
-    std::lock_guard<std::mutex> lock(mu_cond);
+    std::lock_guard<std::mutex> lock(mu);
     needs_update = true;
   }
   conditional.notify_all();
