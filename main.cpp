@@ -4,6 +4,9 @@
 #include <igl/remove_duplicate_vertices.h>
 #include <igl/triangle_triangle_adjacency.h>
 #include <igl/barycenter.h>
+#include <igl/per_face_normals.h>
+#include <igl/parula.h>
+#include <igl/edge_lengths.h>
 #include <igl/viewer/Viewer.h>
 #include <GLFW/glfw3.h>
 #include <thread>
@@ -12,6 +15,9 @@
 
 // TODO:
 //  - select everything under piecewise linear path of cursor not just points
+//  - select everything within some brush radius
+//  - weight smoothness term by edge lengths
+//  - weight data term by local area
 //  
 
 int main(int argc, char *argv[])
@@ -30,12 +36,12 @@ int main(int argc, char *argv[])
 
   Eigen::MatrixXd BC;
   igl::barycenter(V,F,BC);
-  Eigen::VectorXd X = 
-    (BC.col(0).array()-BC.col(0).minCoeff())/
-    (BC.col(0).maxCoeff()-BC.col(0).minCoeff());
+  Eigen::MatrixXd N,EL;
+  igl::per_face_normals(V,F,N);
+  igl::edge_lengths(V,F,EL);
   
   // Number of labels
-  int K = 2;
+  int K = 3;
   int selected_id = 1;
   // per-face-per-label data term: GCO is expecting Row-major ordering
   typedef Eigen::Matrix<int,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor> 
@@ -52,10 +58,9 @@ int main(int argc, char *argv[])
   }
   //
   // per-label-per-label smoothness costs
-  MatrixXRi smooth = MatrixXRi::Zero(K,K);
+  MatrixXRi smooth = MatrixXRi::Constant(K,K,1);
   // Set off diagonals to punish switching labels
-  smooth(0,1) = 0.002*GCO_MAX_ENERGYTERM;
-  smooth(1,0) = 0.002*GCO_MAX_ENERGYTERM;
+  smooth.diagonal().setConstant(0);
 
   // Labels
   Eigen::VectorXi L(F.rows());
@@ -74,12 +79,24 @@ int main(int argc, char *argv[])
     // For each edge of this triangle
     for(int ei = 0; ei<TT[f].size();ei++)
     {
+      const double w_el = EL(f,ei);
       // For each neighboring triangle
       for(int ni = 0;ni<TT[f][ei].size();ni++)
       {
         // index of neighboring triangle
         int g = TT[f][ei][ni];
-        gc.setNeighbors(f,g,1);
+        // "Randomized Cuts for 3D Mesh Analysis" [Golovinskiy and Funkhouser
+        // 2008]
+        // 
+        // "if θ is the exterior dihedral angle across an edge, we define a
+        // concave weight w(θ ) = min((θ /π )α , 1)"
+        //
+        const double alpha = 10.0;
+        gc.setNeighbors(
+          f,g, 
+          w_el * 
+          std::pow( std::abs(N.row(f).dot(N.row(g))),alpha)
+          *GCO_MAX_ENERGYTERM );
       }
     }
   }
@@ -94,7 +111,7 @@ int main(int argc, char *argv[])
   bool background_thread_is_looping = true;
   bool needs_update = false;
 
-  const auto update_colors = [&L,&U,&viewer]()
+  const auto update_colors = [&L,&U,&viewer,&K]()
   {
     for(int f = 0;f<L.size();f++)
     {
@@ -103,11 +120,20 @@ int main(int argc, char *argv[])
         L(f) = U(f);
       }
     }
-    viewer.data.set_colors(L.cast<double>());
+    Eigen::MatrixXd C;
+    igl::parula(L,0,K-1,C);
+    viewer.data.set_colors(C);
   };
-  const auto update_cut = [&gc,&update_colors,&L,&mu]()
+  const auto update_cut = [&gc,&update_colors,&L,&mu,&K]()
   {
-    gc.swap(1);
+    try
+    {
+      //gc.expansion(K-1);
+      gc.swap(K-1);
+    }catch(GCException e)
+    {
+      e.Report();
+    }
     for(int f = 0;f<L.size();f++)
     {
       L(f) = gc.whatLabel(f);
